@@ -1,6 +1,6 @@
 """
 Project Analyzer
-Responsibility: Lightweight heuristic parsing of RTL files to detect modules and testbenches.
+Responsibility: Lightweight heuristic parsing of RTL files to detect modules, testbenches, and ports.
 """
 import os
 import re
@@ -9,7 +9,7 @@ class ProjectAnalyzer:
     def __init__(self, root_path):
         self.root_path = root_path
         self.rtl_files = []
-        self.modules = {} # { name: {"file": path, "line": int, "is_tb": bool} }
+        self.modules = {} # { name: {"file": path, "line": int, "is_tb": bool, "inputs": int, "outputs": int, "regs": int} }
         self.top_modules = []
         self.testbenches = []
 
@@ -29,7 +29,7 @@ class ProjectAnalyzer:
                 if f.endswith(valid_exts):
                     self.rtl_files.append(os.path.join(root, f))
 
-        # 2. Module Detection
+        # 2. Module & Port Detection
         mod_pattern = re.compile(r"\bmodule\s+(\w+)")
         tb_indicators = re.compile(r"\b(initial|#\d+|\$display|\$monitor|\$finish|\$dumpfile|\$dumpvars)\b")
         
@@ -42,6 +42,11 @@ class ProjectAnalyzer:
                     
                     is_tb_file = "tb" in os.path.basename(filepath).lower() or "test" in os.path.basename(filepath).lower()
                     
+                    # Heuristic metrics for Design Analysis
+                    inputs = len(re.findall(r'\binput\b', content))
+                    outputs = len(re.findall(r'\boutput\b', content))
+                    regs = len(re.findall(r'\breg\b', content))
+                    
                     for i, line in enumerate(content.split('\n')):
                         match = mod_pattern.search(line)
                         if match:
@@ -50,15 +55,17 @@ class ProjectAnalyzer:
                             self.modules[mod_name] = {
                                 "file": filepath,
                                 "line": i + 1,
-                                "is_tb": is_tb
+                                "is_tb": is_tb,
+                                "inputs": inputs,
+                                "outputs": outputs,
+                                "regs": regs
                             }
                             if is_tb and mod_name not in self.testbenches:
                                 self.testbenches.append(mod_name)
             except Exception:
                 pass
 
-        # 3. Top Module Detection (Hardware Top)
-        # A design top is a non-testbench module that is NOT instantiated by any OTHER non-testbench module.
+        # 3. Top Module Detection
         for mod_name in self.modules:
             if self.modules[mod_name]["is_tb"]: 
                 continue
@@ -68,10 +75,7 @@ class ProjectAnalyzer:
             
             for filepath, content in file_contents.items():
                 if filepath != self.modules[mod_name]["file"]:
-                    # Check if the file doing the instantiating is a design file or a TB file
                     file_is_tb = any(m["is_tb"] for m in self.modules.values() if m["file"] == filepath)
-                    
-                    # If instantiated by another hardware file, it is NOT the top module
                     if not file_is_tb:
                         if inst_pattern.search(content):
                             is_instantiated_by_design = True

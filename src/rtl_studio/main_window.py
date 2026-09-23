@@ -4,6 +4,7 @@ Responsibility: Central IDE orchestration, RTL Analysis, Icarus, GTKWave, Yosys,
 """
 import os
 import shutil
+import re
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
                                QLabel, QStatusBar, QApplication, QFileDialog, 
                                QMessageBox, QInputDialog, QLineEdit, QPushButton, QTabWidget, QToolBar)
@@ -115,34 +116,14 @@ class MainWindow(QMainWindow):
         self.find_bar.hide()
         find_layout = QHBoxLayout(self.find_bar)
         find_layout.setContentsMargins(4, 4, 4, 4)
-        
         self.find_input = QLineEdit()
         self.find_input.setPlaceholderText("Find...")
         self.replace_input = QLineEdit()
         self.replace_input.setPlaceholderText("Replace with...")
-        
-        find_layout.addWidget(self.find_input)
-        find_layout.addWidget(self.replace_input)
-        
-        btn_next = QPushButton("Next")
-        btn_next.clicked.connect(self.find_next)
-        find_layout.addWidget(btn_next)
-        
-        btn_prev = QPushButton("Prev")
-        btn_prev.clicked.connect(self.find_prev)
-        find_layout.addWidget(btn_prev)
-        
-        btn_replace = QPushButton("Replace")
-        btn_replace.clicked.connect(self.replace_text)
-        find_layout.addWidget(btn_replace)
-        
-        btn_replace_all = QPushButton("Replace All")
-        btn_replace_all.clicked.connect(self.replace_all_text)
-        find_layout.addWidget(btn_replace_all)
-        
-        btn_close_find = QPushButton("X")
-        btn_close_find.clicked.connect(self.find_bar.hide)
-        find_layout.addWidget(btn_close_find)
+        for text, cb in [("Next", self.find_next), ("Prev", self.find_prev), ("Replace", self.replace_text), ("Replace All", self.replace_all_text), ("X", self.find_bar.hide)]:
+            btn = QPushButton(text)
+            btn.clicked.connect(cb)
+            find_layout.addWidget(self.find_input if text == "Next" else self.replace_input if text == "Replace" else btn)
 
         self.editor_container = QWidget()
         editor_layout = QVBoxLayout(self.editor_container)
@@ -174,7 +155,6 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.editor_status_label)
         
         self.eda_status_label = QLabel(" Detecting EDA Tools... ")
-        
         self.theme_toggle_btn = QLabel(" Theme: Dark " if self.is_dark_theme else " Theme: Light ")
         self.theme_toggle_btn.setStyleSheet("text-decoration: underline;")
         self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -230,29 +210,13 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_act)
         
         edit_menu = menubar.addMenu("Edit")
-        
-        find_act = QAction("Find...", self)
-        find_act.setShortcut(QKeySequence("Ctrl+F"))
-        find_act.triggered.connect(self.show_find)
-        edit_menu.addAction(find_act)
-        
-        replace_act = QAction("Replace...", self)
-        replace_act.setShortcut(QKeySequence("Ctrl+H"))
-        replace_act.triggered.connect(self.show_replace)
-        edit_menu.addAction(replace_act)
-        
-        goto_act = QAction("Go To Line...", self)
-        goto_act.setShortcut(QKeySequence("Ctrl+G"))
-        goto_act.triggered.connect(self.go_to_line)
-        edit_menu.addAction(goto_act)
-        
-        search_proj_act = QAction("Search Project...", self)
-        search_proj_act.setShortcut(QKeySequence("Ctrl+Shift+F"))
-        search_proj_act.triggered.connect(self.search_project)
-        edit_menu.addAction(search_proj_act)
+        for txt, shortcut, cb in [("Find...", "Ctrl+F", self.show_find), ("Replace...", "Ctrl+H", self.show_replace), ("Go To Line...", "Ctrl+G", self.go_to_line), ("Search Project...", "Ctrl+Shift+F", self.search_project)]:
+            act = QAction(txt, self)
+            act.setShortcut(QKeySequence(shortcut))
+            act.triggered.connect(cb)
+            edit_menu.addAction(act)
             
         edit_menu.addSeparator()
-        
         settings_act = QAction("Editor Settings...", self)
         settings_act.triggered.connect(self.open_settings)
         edit_menu.addAction(settings_act)
@@ -310,9 +274,8 @@ class MainWindow(QMainWindow):
         self.run_menu.addAction(self.schematic_act)
 
         view_menu = menubar.addMenu("View")
-        view_menu.addAction("Project Explorer")
-        view_menu.addAction("Output")
-        view_menu.addAction("Terminal")
+        for item in ["Project Explorer", "Output", "Terminal"]: 
+            view_menu.addAction(item)
             
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("About RTL Studio")
@@ -350,7 +313,6 @@ class MainWindow(QMainWindow):
         cfg = self.project_config.data
         sources_changed = False
         
-        # 0. Self-Healing: Move known TBs out of design_sources (fixes legacy migration corruption)
         if cfg.get("design_sources"):
             for src in list(cfg["design_sources"]):
                 abs_path = os.path.normpath(os.path.join(self.current_project, src))
@@ -365,7 +327,6 @@ class MainWindow(QMainWindow):
                         cfg["testbench_sources"].append(src)
                     sources_changed = True
         
-        # 1. Auto-configure sources if empty
         if not cfg.get("design_sources") and not cfg.get("testbench_sources") and self.project_analyzer.rtl_files:
             for f in self.project_analyzer.rtl_files:
                 rel_path = os.path.relpath(f, self.current_project)
@@ -383,7 +344,6 @@ class MainWindow(QMainWindow):
                         cfg["design_sources"].append(rel_path)
             sources_changed = True
             
-        # 2. Auto-configure top modules if empty and exactly ONE clear candidate exists
         if not cfg.get("top_module") and self.project_analyzer.top_modules and len(self.project_analyzer.top_modules) == 1:
             cfg["top_module"] = self.project_analyzer.top_modules[0]
             sources_changed = True
@@ -464,7 +424,20 @@ class MainWindow(QMainWindow):
             self.output_panel.log("Synthesis stopped.")
         self.enable_eda_buttons()
 
-# --- PHASE 8/9: YOSYS SYNTHESIS & SCHEMATIC GENERATION ---
+    def load_previous_synthesis_log(self):
+        if not self.current_project: return
+        log_path = os.path.join(self.current_project, ".rtlstudio", "logs", "synthesis.log")
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    log_text = f.read()
+                self.analysis_panel.update_ppa(log_text, self.project_analyzer, self.project_config)
+                return
+            except Exception:
+                pass
+        self.analysis_panel.clear_ppa()
+
+    # --- PHASE 8/9/10: YOSYS SYNTHESIS, SCHEMATIC & PPA ---
     def run_synthesis(self, *args, **kwargs):
         try:
             if not self.ensure_project_open(): return
@@ -479,7 +452,6 @@ class MainWindow(QMainWindow):
             cfg = self.project_config.data
             top_mod = cfg.get("top_module")
             
-            # Guardrail: Safely extract design sources, completely stripping the TB file just in case
             raw_design_srcs = cfg.get("design_sources") or []
             design_srcs = []
             
@@ -507,7 +479,6 @@ class MainWindow(QMainWindow):
             os.makedirs(synth_dir, exist_ok=True)
             os.makedirs(logs_dir, exist_ok=True)
             
-            # Wipe old schematic cleanly so UI correctly reflects new success/failure
             schematic_path = os.path.join(synth_dir, "schematic.svg")
             if os.path.exists(schematic_path):
                 os.remove(schematic_path)
@@ -527,7 +498,6 @@ class MainWindow(QMainWindow):
                 f.write(f'synth -top {top_mod}\n')
                 f.write(f'write_verilog "{output_v.replace(os.sep, "/")}"\n')
                 
-                # FIX: Use a safe, unquoted relative path to prevent Yosys string parsing bugs
                 if self.graphviz.available:
                     f.write(f'show -format svg -prefix .rtlstudio/synthesis/schematic {top_mod}\n')
                     
@@ -542,10 +512,14 @@ class MainWindow(QMainWindow):
             self.output_panel.log(f"INTERNAL ERROR during Synthesis: {str(e)}")
 
     def handle_yosys_stdout(self): 
-        self.yosys_output_buffer += self.yosys_process.readAllStandardOutput().data().decode('utf-8')
+        raw = self.yosys_process.readAllStandardOutput().data().decode('utf-8', errors='replace')
+        clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', raw)
+        self.yosys_output_buffer += clean
         
     def handle_yosys_stderr(self): 
-        self.yosys_output_buffer += self.yosys_process.readAllStandardError().data().decode('utf-8')
+        raw = self.yosys_process.readAllStandardError().data().decode('utf-8', errors='replace')
+        clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', raw)
+        self.yosys_output_buffer += clean
         
     def handle_yosys_finished(self, exit_code, exit_status):
         self.enable_eda_buttons()
@@ -559,12 +533,24 @@ class MainWindow(QMainWindow):
         if exit_code == 0 and exit_status == QProcess.ExitStatus.NormalExit:
             self.output_panel.log("Synthesis completed successfully. ✓")
             self.output_panel.log("Synthesis Statistics:")
+            
             for line in self.yosys_output_buffer.split('\n'):
-                if line.startswith("   Number of") or " $_" in line or " \\" in line: 
-                    self.output_panel.log(line.rstrip())
+                low = line.strip().lower()
+                if low.startswith("number of") or "$_" in line or "\\" in line: 
+                    self.output_panel.log(line.strip())
+                    
             self.output_panel.log("Synthesized netlist generated in .rtlstudio/synthesis/")
             self.project_explorer.load_project(self.current_project)
             self.check_for_synthesis_artifacts()
+            
+            # Update PPA dashboard safely
+            self.analysis_panel.update_ppa(self.yosys_output_buffer, self.project_analyzer, self.project_config)
+            
+            # AUTOMATICALLY SWITCH TABS TO FOCUS ON THE DESIGN/PPA DASHBOARD
+            self.left_tabs.setCurrentWidget(self.analysis_panel)
+            self.analysis_panel.tabs.setCurrentIndex(1)
+            
+            self.output_panel.log("PPA analysis updated successfully.")
         else:
             self.output_panel.log(f"ERROR: Synthesis failed with exit code {exit_code}. ✗")
             for line in self.yosys_output_buffer.split('\n'):
@@ -849,6 +835,7 @@ class MainWindow(QMainWindow):
         self.output_panel.log(f"Project opened: {os.path.basename(path)}")
         
         self.analyze_project()
+        self.load_previous_synthesis_log()
         self.check_for_vcd_artifacts()
         self.check_for_synthesis_artifacts()
         
@@ -865,6 +852,7 @@ class MainWindow(QMainWindow):
         self.project_explorer.clear()
         self.project_explorer.setHeaderLabels(["PROJECT"])
         self.analysis_panel.update_analysis(ProjectAnalyzer(""), None)
+        self.analysis_panel.clear_ppa()
         
         self.gtkwave_act.setEnabled(False)
         self.yosys_act.setEnabled(False)

@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         self.sim_process.finished.connect(self.handle_sim_finished)
 
         self.gtkwave_process = QProcess(self)
-        self.gtkwave_process.finished.connect(lambda: self.output_panel.log("GTKWave closed."))
+        self.gtkwave_process.finished.connect(lambda: self.output_panel.log("✅ GTKWave closed."))
         
         self.yosys_process = QProcess(self)
         self.yosys_process.readyReadStandardOutput.connect(self.handle_yosys_stdout)
@@ -68,8 +68,9 @@ class MainWindow(QMainWindow):
         self.setup_toolbar()
         self.apply_theme()
         
-        self.output_panel.log("Application started successfully.")
+        self.output_panel.log("✅ Application started successfully.")
         self.check_eda_tools()
+        self.update_toolbar_state()
 
     def check_eda_tools(self):
         status_text = ""
@@ -92,7 +93,7 @@ class MainWindow(QMainWindow):
             status_text += f"| Graphviz: v{self.graphviz.version} "
         else:
             status_text += "| Graphviz: Not Found "
-            self.output_panel.log("WARNING: Graphviz (dot) is missing. Schematic generation will be skipped.")
+            self.output_panel.log("⚠️ WARNING: Graphviz (dot) is missing. Schematic generation will be skipped.")
 
         self.eda_status_label.setText(status_text)
         if not self.icarus.available or not self.gtkwave.available or not self.yosys.available:
@@ -155,15 +156,20 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self.editor_status_label)
         
         self.eda_status_label = QLabel(" Detecting EDA Tools... ")
+        
+        self.lang_indicator = QLabel(" | Language: Verilog ")
+        self.lang_indicator.setStyleSheet("color: #92929A;")
+        
         self.theme_toggle_btn = QLabel(" Theme: Dark " if self.is_dark_theme else " Theme: Light ")
         self.theme_toggle_btn.setStyleSheet("text-decoration: underline;")
         self.theme_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_toggle_btn.mousePressEvent = self.toggle_theme
         
-        self.status_indicator = QLabel(" | ● RTL Studio ")
+        self.status_indicator = QLabel(" | ● PINARX ")
         self.status_indicator.setStyleSheet("color: #d85c96; font-weight: bold; font-family: monospace;")
         
         self.status_bar.addPermanentWidget(self.eda_status_label)
+        self.status_bar.addPermanentWidget(self.lang_indicator)
         self.status_bar.addPermanentWidget(self.theme_toggle_btn)
         self.status_bar.addPermanentWidget(self.status_indicator)
 
@@ -250,7 +256,6 @@ class MainWindow(QMainWindow):
         self.stop_act = QAction("Stop Process", self)
         self.stop_act.setIconText("Stop")
         self.stop_act.triggered.connect(self.stop_active_process)
-        self.stop_act.setEnabled(False)
         self.run_menu.addAction(self.stop_act)
         
         self.run_menu.addSeparator()
@@ -258,19 +263,16 @@ class MainWindow(QMainWindow):
         self.gtkwave_act = QAction("Open Waveform", self)
         self.gtkwave_act.setIconText("Waveform")
         self.gtkwave_act.triggered.connect(self.open_waveform)
-        self.gtkwave_act.setEnabled(False)
         self.run_menu.addAction(self.gtkwave_act)
         
         self.yosys_act = QAction("Synthesis", self)
         self.yosys_act.setIconText("Synthesis")
         self.yosys_act.triggered.connect(self.run_synthesis)
-        self.yosys_act.setEnabled(False)
         self.run_menu.addAction(self.yosys_act)
         
         self.schematic_act = QAction("View Schematic", self)
         self.schematic_act.setIconText("Schematic")
         self.schematic_act.triggered.connect(self.open_schematic)
-        self.schematic_act.setEnabled(False)
         self.run_menu.addAction(self.schematic_act)
 
         view_menu = menubar.addMenu("View")
@@ -302,6 +304,57 @@ class MainWindow(QMainWindow):
         self.gtkwave_act.setIcon(create_eda_icon("waveform", self.is_dark_theme))
         self.yosys_act.setIcon(create_eda_icon("synthesis", self.is_dark_theme))
         self.schematic_act.setIcon(create_eda_icon("schematic", self.is_dark_theme))
+
+    # --- PHASE 11: UNIFIED TOOLBAR & STATE MANAGEMENT ---
+    def update_toolbar_state(self):
+        """Intelligently configures all EDA actions based on disk artifacts and running processes."""
+        if not self.current_project:
+            self.build_act.setEnabled(False)
+            self.sim_act.setEnabled(False)
+            self.yosys_act.setEnabled(False)
+            self.gtkwave_act.setEnabled(False)
+            self.schematic_act.setEnabled(False)
+            self.stop_act.setEnabled(False)
+            return
+
+        is_running = (self.build_process.state() == QProcess.ProcessState.Running or 
+                      self.sim_process.state() == QProcess.ProcessState.Running or 
+                      self.yosys_process.state() == QProcess.ProcessState.Running)
+
+        self.stop_act.setEnabled(is_running)
+
+        if is_running:
+            self.build_act.setEnabled(False)
+            self.sim_act.setEnabled(False)
+            self.yosys_act.setEnabled(False)
+            self.gtkwave_act.setEnabled(False)
+            self.schematic_act.setEnabled(False)
+        else:
+            self.build_act.setEnabled(self.icarus.available)
+            self.yosys_act.setEnabled(self.yosys.available)
+            
+            vvp_file = os.path.join(self.current_project, ".rtlstudio", "build", "simulation.vvp")
+            self.sim_act.setEnabled(self.icarus.available and os.path.exists(vvp_file))
+            
+            vcd_files = [f for f in os.listdir(self.current_project) if f.endswith(".vcd")]
+            self.gtkwave_act.setEnabled(self.gtkwave.available and len(vcd_files) > 0)
+            
+            schematic_path = os.path.join(self.current_project, ".rtlstudio", "synthesis", "schematic.svg")
+            self.schematic_act.setEnabled(self.graphviz.available and os.path.exists(schematic_path))
+
+    def stop_active_process(self):
+        if self.build_process.state() == QProcess.ProcessState.Running: 
+            self.build_process.kill()
+            self.output_panel.log("⚠️ Build stopped by user.")
+        if self.sim_process.state() == QProcess.ProcessState.Running: 
+            self.sim_process.kill()
+            self.output_panel.log("⚠️ Simulation stopped by user.")
+        if self.yosys_process.state() == QProcess.ProcessState.Running: 
+            self.yosys_process.kill()
+            self.output_panel.log("⚠️ Synthesis stopped by user.")
+            
+        self.update_toolbar_state()
+        self.update_status_bar("RTL Studio Ready")
 
     # --- RTL PROJECT ANALYSIS ---
     def analyze_project(self):
@@ -354,7 +407,7 @@ class MainWindow(QMainWindow):
             
         if sources_changed:
             self.project_config.save()
-            self.output_panel.log("Auto-configured project sources and modules.")
+            self.output_panel.log("✅ Auto-configured project sources and modules.")
             
         self.analysis_panel.update_analysis(self.project_analyzer, self.project_config)
 
@@ -363,7 +416,7 @@ class MainWindow(QMainWindow):
             return False
             
         if not quiet: 
-            self.output_panel.log("Project validation started.")
+            self.output_panel.log("▶ Project validation started.")
             
         errors = 0
         cfg = self.project_config.data
@@ -373,56 +426,33 @@ class MainWindow(QMainWindow):
         all_sources = design_sources + tb_sources
         
         if not all_sources:
-            if not quiet: self.output_panel.log("ERROR: No RTL source files configured.")
+            if not quiet: self.output_panel.log("❌ ERROR: No RTL source files configured.")
             errors += 1
         else:
             for rel_src in all_sources:
                 if not os.path.exists(os.path.join(self.current_project, rel_src)):
-                    if not quiet: self.output_panel.log(f"ERROR: Source file does not exist: {rel_src}")
+                    if not quiet: self.output_panel.log(f"❌ ERROR: Source file does not exist: {rel_src}")
                     errors += 1
                 
         top_mod = cfg.get("top_module")
         if not top_mod:
-            if not quiet: self.output_panel.log("ERROR: No Design Top module configured.")
+            if not quiet: self.output_panel.log("❌ ERROR: No Design Top module configured.")
             errors += 1
         elif top_mod not in self.project_analyzer.modules:
-            if not quiet: self.output_panel.log(f"ERROR: Design Top module '{top_mod}' not found.")
+            if not quiet: self.output_panel.log(f"❌ ERROR: Design Top module '{top_mod}' not found.")
             errors += 1
             
         tb_mod = cfg.get("testbench_module")
         if tb_mod and tb_mod not in self.project_analyzer.modules:
-            if not quiet: self.output_panel.log(f"ERROR: Testbench '{tb_mod}' not found.")
+            if not quiet: self.output_panel.log(f"❌ ERROR: Testbench '{tb_mod}' not found.")
             errors += 1
 
         if errors == 0: 
-            if not quiet: self.output_panel.log("Validation completed successfully.")
+            if not quiet: self.output_panel.log("✅ Validation completed successfully.")
             return True
         else: 
             if not quiet: QMessageBox.warning(self, "Validation Failed", f"Found {errors} error(s). Check Output panel.")
             return False
-
-    def disable_eda_buttons(self):
-        self.build_act.setEnabled(False)
-        self.sim_act.setEnabled(False)
-        self.yosys_act.setEnabled(False)
-        self.stop_act.setEnabled(True)
-
-    def enable_eda_buttons(self):
-        self.build_act.setEnabled(self.icarus.available)
-        self.yosys_act.setEnabled(self.yosys.available)
-        self.stop_act.setEnabled(False)
-
-    def stop_active_process(self):
-        if self.build_process.state() == QProcess.ProcessState.Running: 
-            self.build_process.kill()
-            self.output_panel.log("Build stopped.")
-        if self.sim_process.state() == QProcess.ProcessState.Running: 
-            self.sim_process.kill()
-            self.output_panel.log("Simulation stopped.")
-        if self.yosys_process.state() == QProcess.ProcessState.Running: 
-            self.yosys_process.kill()
-            self.output_panel.log("Synthesis stopped.")
-        self.enable_eda_buttons()
 
     def load_previous_synthesis_log(self):
         if not self.current_project: return
@@ -437,16 +467,18 @@ class MainWindow(QMainWindow):
                 pass
         self.analysis_panel.clear_ppa()
 
-    # --- PHASE 8/9/10: YOSYS SYNTHESIS, SCHEMATIC & PPA ---
+    # --- YOSYS SYNTHESIS, SCHEMATIC & PPA ---
     def run_synthesis(self, *args, **kwargs):
         try:
             if not self.ensure_project_open(): return
+            if self.yosys_process.state() == QProcess.ProcessState.Running: return
+            
             if not self.yosys.available:
-                self.output_panel.log("ERROR: Yosys is missing.")
+                self.output_panel.log("❌ ERROR: Yosys is missing.")
                 return
                 
             if not self.validate_project(quiet=False):
-                self.output_panel.log("ERROR: Synthesis cancelled because project validation failed.")
+                self.output_panel.log("❌ ERROR: Synthesis cancelled because project validation failed.")
                 return
                 
             cfg = self.project_config.data
@@ -466,10 +498,10 @@ class MainWindow(QMainWindow):
                     design_srcs.append(abs_src)
             
             if not top_mod:
-                self.output_panel.log("ERROR: No Design Top module configured.")
+                self.output_panel.log("❌ ERROR: No Design Top module configured.")
                 return
             if not design_srcs:
-                self.output_panel.log("ERROR: No hardware design sources configured for synthesis.")
+                self.output_panel.log("❌ ERROR: No hardware design sources configured for synthesis.")
                 return
 
             self.editor_tabs.save_all_files()
@@ -483,10 +515,10 @@ class MainWindow(QMainWindow):
             if os.path.exists(schematic_path):
                 os.remove(schematic_path)
 
-            self.output_panel.log("--- Yosys Synthesis Started ---")
-            self.output_panel.log(f"Top module: {top_mod}")
-            self.output_panel.log(f"Hardware sources: {len(design_srcs)}")
-            self.output_panel.log("Running Yosys...")
+            self.output_panel.log("▶ --- Yosys Synthesis Started ---")
+            self.output_panel.log(f"▶ Top module: {top_mod}")
+            self.output_panel.log(f"▶ Hardware sources: {len(design_srcs)}")
+            self.output_panel.log("▶ Running Yosys...")
 
             script_path = os.path.join(synth_dir, "synth.ys")
             output_v = os.path.join(synth_dir, "synthesized.v")
@@ -504,12 +536,15 @@ class MainWindow(QMainWindow):
                 f.write('stat\n')
 
             self.yosys_output_buffer = ""
-            self.disable_eda_buttons()
             self.yosys_process.setWorkingDirectory(self.current_project)
             self.yosys_process.start(self.yosys.path, ["-s", script_path])
             
+            self.update_toolbar_state()
+            self.update_status_bar("Running Yosys synthesis...")
+            
         except Exception as e:
-            self.output_panel.log(f"INTERNAL ERROR during Synthesis: {str(e)}")
+            self.output_panel.log(f"❌ INTERNAL ERROR during Synthesis: {str(e)}")
+            self.update_toolbar_state()
 
     def handle_yosys_stdout(self): 
         raw = self.yosys_process.readAllStandardOutput().data().decode('utf-8', errors='replace')
@@ -522,7 +557,8 @@ class MainWindow(QMainWindow):
         self.yosys_output_buffer += clean
         
     def handle_yosys_finished(self, exit_code, exit_status):
-        self.enable_eda_buttons()
+        self.update_status_bar("RTL Studio Ready")
+        
         log_path = os.path.join(self.current_project, ".rtlstudio", "logs", "synthesis.log")
         try:
             with open(log_path, "w", encoding="utf-8") as f: 
@@ -531,54 +567,42 @@ class MainWindow(QMainWindow):
             pass
 
         if exit_code == 0 and exit_status == QProcess.ExitStatus.NormalExit:
-            self.output_panel.log("Synthesis completed successfully. ✓")
-            self.output_panel.log("Synthesis Statistics:")
+            self.output_panel.log("✅ Synthesis completed successfully.")
+            self.output_panel.log("▶ Synthesis Statistics:")
             
             for line in self.yosys_output_buffer.split('\n'):
                 low = line.strip().lower()
                 if low.startswith("number of") or "$_" in line or "\\" in line: 
-                    self.output_panel.log(line.strip())
+                    self.output_panel.log("  " + line.strip())
                     
-            self.output_panel.log("Synthesized netlist generated in .rtlstudio/synthesis/")
+            self.output_panel.log("✅ Synthesized netlist generated in .rtlstudio/synthesis/")
             self.project_explorer.load_project(self.current_project)
-            self.check_for_synthesis_artifacts()
             
-            # Update PPA dashboard safely
             self.analysis_panel.update_ppa(self.yosys_output_buffer, self.project_analyzer, self.project_config)
-            
-            # AUTOMATICALLY SWITCH TABS TO FOCUS ON THE DESIGN/PPA DASHBOARD
             self.left_tabs.setCurrentWidget(self.analysis_panel)
             self.analysis_panel.tabs.setCurrentIndex(1)
             
-            self.output_panel.log("PPA analysis updated successfully.")
+            self.output_panel.log("✅ PPA analysis updated successfully.")
         else:
-            self.output_panel.log(f"ERROR: Synthesis failed with exit code {exit_code}. ✗")
+            self.output_panel.log(f"❌ ERROR: Synthesis failed with exit code {exit_code}.")
             for line in self.yosys_output_buffer.split('\n'):
                 if "ERROR:" in line or "syntax error" in line.lower(): 
-                    self.output_panel.log(line.strip())
-            self.schematic_act.setEnabled(False)
+                    self.output_panel.log("  " + line.strip())
 
-    def check_for_synthesis_artifacts(self):
-        if not self.current_project: return
-        schematic_path = os.path.join(self.current_project, ".rtlstudio", "synthesis", "schematic.svg")
-        if os.path.exists(schematic_path):
-            self.output_panel.log("Schematic generated successfully.")
-            self.schematic_act.setEnabled(True)
-        else:
-            self.schematic_act.setEnabled(False)
+        self.update_toolbar_state()
 
     def open_schematic(self):
         schematic_path = os.path.join(self.current_project, ".rtlstudio", "synthesis", "schematic.svg")
         if not os.path.exists(schematic_path):
-            self.output_panel.log("ERROR: Schematic not found. Run synthesis first.")
+            self.output_panel.log("❌ ERROR: Schematic not found. Run synthesis first.")
             return
             
         try:
             self.schematic_viewer_dialog = SchematicViewer(schematic_path, self)
             self.schematic_viewer_dialog.show()
-            self.output_panel.log("Opened schematic viewer.")
+            self.output_panel.log("▶ Opened schematic viewer.")
         except Exception as e:
-            self.output_panel.log(f"ERROR launching Schematic Viewer: {str(e)}")
+            self.output_panel.log(f"❌ ERROR launching Schematic Viewer: {str(e)}")
 
     # --- ICARUS BUILD & SIMULATION ---
     def setup_build_workspace(self):
@@ -591,7 +615,12 @@ class MainWindow(QMainWindow):
     def run_build(self, *args, **kwargs):
         try:
             if not self.ensure_project_open(): return
-            if not self.icarus.available: return
+            if self.build_process.state() == QProcess.ProcessState.Running: return
+            
+            if not self.icarus.available: 
+                self.output_panel.log("❌ ERROR: Icarus Verilog is missing.")
+                return
+                
             self.analyze_project()
             
             cfg = self.project_config.data
@@ -600,7 +629,7 @@ class MainWindow(QMainWindow):
             all_srcs = design_srcs + tb_srcs
             
             if not all_srcs: 
-                self.output_panel.log("ERROR: No RTL source files configured for build.")
+                self.output_panel.log("❌ ERROR: No RTL source files configured for build.")
                 return
                 
             self.editor_tabs.save_all_files()
@@ -613,7 +642,7 @@ class MainWindow(QMainWindow):
                 except Exception: 
                     pass
                     
-            self.output_panel.log("--- Icarus Verilog Build Started ---")
+            self.output_panel.log("▶ --- Icarus Verilog Build Started ---")
             args_cmd = ["-g2012", "-o", output_file] 
             
             top_mod = cfg.get("testbench_module") or cfg.get("top_module")
@@ -623,12 +652,15 @@ class MainWindow(QMainWindow):
             for rel_src in all_srcs: 
                 args_cmd.append(os.path.join(self.current_project, rel_src))
                 
-            self.disable_eda_buttons()
             self.build_process.setWorkingDirectory(self.current_project)
             self.build_process.start(self.icarus.iverilog_path, args_cmd)
             
+            self.update_toolbar_state()
+            self.update_status_bar("Building project...")
+            
         except Exception as e:
-            self.output_panel.log(f"INTERNAL ERROR during Build: {str(e)}")
+            self.output_panel.log(f"❌ INTERNAL ERROR during Build: {str(e)}")
+            self.update_toolbar_state()
 
     def handle_build_stdout(self): 
         self.output_panel.append_raw(self.build_process.readAllStandardOutput().data().decode('utf-8'))
@@ -637,30 +669,35 @@ class MainWindow(QMainWindow):
         self.output_panel.append_raw(self.build_process.readAllStandardError().data().decode('utf-8'))
         
     def handle_build_finished(self, exit_code, exit_status):
-        self.enable_eda_buttons()
+        self.update_status_bar("RTL Studio Ready")
         if exit_code == 0 and exit_status == QProcess.ExitStatus.NormalExit: 
-            self.output_panel.log("Build successful.")
-            self.sim_act.setEnabled(True)
+            self.output_panel.log("✅ Build successful.")
         else: 
-            self.output_panel.log(f"ERROR: Build failed with exit code {exit_code}.")
-            self.sim_act.setEnabled(False)
+            self.output_panel.log(f"❌ ERROR: Build failed with exit code {exit_code}.")
+            
+        self.update_toolbar_state()
 
     def run_simulation(self, *args, **kwargs):
         try:
             if not self.ensure_project_open() or not self.icarus.available: return
+            if self.sim_process.state() == QProcess.ProcessState.Running: return
             
             vvp_file = os.path.join(self.current_project, ".rtlstudio", "build", "simulation.vvp")
             if not os.path.exists(vvp_file): 
-                self.output_panel.log("ERROR: simulation.vvp not found. Please build the project first.")
+                self.output_panel.log("❌ ERROR: simulation.vvp not found. Please build the project first.")
                 return
                 
-            self.output_panel.log("--- Simulation Started ---")
-            self.disable_eda_buttons()
+            self.output_panel.log("▶ --- Simulation Started ---")
+            
             self.sim_process.setWorkingDirectory(self.current_project)
             self.sim_process.start(self.icarus.vvp_path, [vvp_file])
             
+            self.update_toolbar_state()
+            self.update_status_bar("Running simulation...")
+            
         except Exception as e:
-            self.output_panel.log(f"INTERNAL ERROR during Simulation: {str(e)}")
+            self.output_panel.log(f"❌ INTERNAL ERROR during Simulation: {str(e)}")
+            self.update_toolbar_state()
 
     def handle_sim_stdout(self): 
         self.output_panel.append_raw(self.sim_process.readAllStandardOutput().data().decode('utf-8'))
@@ -669,13 +706,14 @@ class MainWindow(QMainWindow):
         self.output_panel.append_raw(self.sim_process.readAllStandardError().data().decode('utf-8'))
         
     def handle_sim_finished(self, exit_code, exit_status):
-        self.enable_eda_buttons()
-        self.sim_act.setEnabled(True)
+        self.update_status_bar("RTL Studio Ready")
         if exit_status == QProcess.ExitStatus.CrashExit: 
-            self.output_panel.log("Simulation stopped by user or crashed.")
+            self.output_panel.log("⚠️ Simulation stopped by user or crashed.")
         else: 
-            self.output_panel.log(f"Simulation completed. Exit code: {exit_code}")
-            self.check_for_vcd_artifacts()
+            self.output_panel.log(f"✅ Simulation completed. Exit code: {exit_code}")
+            
+        self.check_for_vcd_artifacts()
+        self.update_toolbar_state()
 
     # --- GTKWAVE ---
     def check_for_vcd_artifacts(self):
@@ -683,22 +721,21 @@ class MainWindow(QMainWindow):
         if vcd_files:
             vcd_files.sort(key=lambda x: os.path.getmtime(os.path.join(self.current_project, x)), reverse=True)
             self.current_vcd = os.path.join(self.current_project, vcd_files[0])
-            self.output_panel.log(f"Waveform detected: {vcd_files[0]}")
+            self.output_panel.log(f"▶ Waveform detected: {vcd_files[0]}")
             self.project_explorer.load_project(self.current_project)
-            if self.gtkwave.available: 
-                self.gtkwave_act.setEnabled(True)
         else:
             self.current_vcd = None
-            self.gtkwave_act.setEnabled(False)
+            
+        self.update_toolbar_state()
 
     def open_waveform(self):
         if not self.gtkwave.available: return
         if not self.current_vcd or not os.path.exists(self.current_vcd): 
-            self.output_panel.log("ERROR: No waveform available.")
+            self.output_panel.log("❌ ERROR: No waveform available.")
             return
         if self.gtkwave_process.state() == QProcess.ProcessState.Running: return
         
-        self.output_panel.log(f"Launching GTKWave for {os.path.basename(self.current_vcd)}...")
+        self.output_panel.log(f"▶ Launching GTKWave for {os.path.basename(self.current_vcd)}...")
         self.gtkwave_process.setWorkingDirectory(self.current_project)
         self.gtkwave_process.start(self.gtkwave.path, [self.current_vcd])
 
@@ -744,13 +781,13 @@ class MainWindow(QMainWindow):
         dialog = ProjectSettingsDialog(self.project_config, self.project_analyzer, self)
         if dialog.exec(): 
             self.analyze_project()
-            self.output_panel.log("Project configuration updated.")
+            self.output_panel.log("✅ Project configuration updated.")
 
     def goto_module_definition(self, filepath, line): 
         self.goto_error_definition(filepath, line)
         
     def on_file_saved(self, path): 
-        self.output_panel.log(f"Saved: {os.path.basename(path)}")
+        self.output_panel.log(f"▶ Saved: {os.path.basename(path)}")
         if path.endswith(('.v', '.sv', '.vh', '.svh')): 
             self.analyze_project()
             
@@ -803,7 +840,7 @@ class MainWindow(QMainWindow):
                 e.textCursor().insertText(self.replace_input.text())
                 count += 1
             c.endEditBlock()
-            self.output_panel.log(f"Replaced {count} occurrences.")
+            self.output_panel.log(f"▶ Replaced {count} occurrences.")
         
     def go_to_line(self): 
         e = self.editor_tabs.currentWidget()
@@ -832,15 +869,14 @@ class MainWindow(QMainWindow):
         self.project_analyzer = ProjectAnalyzer(path)
         self.project_explorer.load_project(path)
         self.add_recent_project(path)
-        self.output_panel.log(f"Project opened: {os.path.basename(path)}")
+        self.output_panel.log(f"▶ Project opened: {os.path.basename(path)}")
         
         self.analyze_project()
         self.load_previous_synthesis_log()
         self.check_for_vcd_artifacts()
-        self.check_for_synthesis_artifacts()
         
-        if self.yosys.available: 
-            self.yosys_act.setEnabled(True)
+        self.update_toolbar_state()
+        self.update_status_bar(f"Project loaded: {os.path.basename(path)}")
         
     def close_project(self):
         if not self.editor_tabs.close_all_tabs(): return False
@@ -854,9 +890,7 @@ class MainWindow(QMainWindow):
         self.analysis_panel.update_analysis(ProjectAnalyzer(""), None)
         self.analysis_panel.clear_ppa()
         
-        self.gtkwave_act.setEnabled(False)
-        self.yosys_act.setEnabled(False)
-        self.schematic_act.setEnabled(False)
+        self.update_toolbar_state()
         self.update_status_bar("RTL Studio Ready")
         return True
         

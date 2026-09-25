@@ -93,8 +93,8 @@ STEP 3 → Launch RTL Studio
 ![image alt](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/Pasted%20image%20(4).png?raw=true)
 
 # VERSION 2.0 with cool CANDY POP and GO PRODUCTIVE THEMES
-![image alt](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/Pasted%20image%20(2).png?raw=true)
-![image alt](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/Pasted%20image.png?raw=true)
+![image alt](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/candy_pop.png?raw=true)
+![image alt](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/go_productive.png?raw=true)
 
 
 

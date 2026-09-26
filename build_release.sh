@@ -25,6 +25,7 @@ cp -r dist/RTL_Studio/* "$RELEASE_DIR/app/"
 echo "Copying installer scripts and assets..."
 cp install.sh "$RELEASE_DIR/"
 cp uninstall.sh "$RELEASE_DIR/"
+cp install_eda_tools.sh "$RELEASE_DIR/"
 cp README.md "$RELEASE_DIR/"
 cp assets/LOGO.png "$RELEASE_DIR/" 2>/dev/null || echo "Ensure LOGO.png is in assets/"
 

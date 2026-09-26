@@ -13,73 +13,74 @@ class ProjectAnalyzer:
         self.top_modules = []
         self.testbenches = []
 
-    def analyze(self):
-        self.rtl_files.clear()
+    def analyze(self, actual_files=None):
         self.modules.clear()
         self.top_modules.clear()
         self.testbenches.clear()
+        self.rtl_files = []
         
-        if not self.root_path: return
+        # FIX: Reverted to V2.0's 'self.root_path' attribute
+        if not self.root_path or not os.path.exists(self.root_path):
+            return
+            
+        mod_re = re.compile(r'\bmodule\s+([a-zA-Z_][a-zA-Z0-9_]*)\b')
+        dump_re = re.compile(r'\$(?:dumpfile|dumpvars)')
 
-        # 1. File Discovery
-        valid_exts = ('.v', '.sv', '.vh', '.svh')
-        for root, dirs, files in os.walk(self.root_path):
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ("build", "dist", ".rtlstudio")]
-            for f in files:
-                if f.endswith(valid_exts):
-                    self.rtl_files.append(os.path.join(root, f))
-
-        # 2. Module & Port Detection
-        mod_pattern = re.compile(r"\bmodule\s+(\w+)")
-        tb_indicators = re.compile(r"\b(initial|#\d+|\$display|\$monitor|\$finish|\$dumpfile|\$dumpvars)\b")
+        files_to_scan = actual_files if actual_files is not None else []
+        if not files_to_scan:
+            for root, _, files in os.walk(self.root_path):
+                if '.rtlstudio' in root or '__pycache__' in root: continue
+                for f in files:
+                    if f.endswith(('.v', '.sv', '.vh', '.svh')):
+                        files_to_scan.append(os.path.relpath(os.path.join(root, f), self.root_path).replace('\\', '/'))
         
+        self.rtl_files = files_to_scan
+
         file_contents = {}
-        for filepath in self.rtl_files:
+        declared_modules = set()
+        
+        for rel_file in files_to_scan:
+            abs_file = os.path.join(self.root_path, rel_file)
+            if not os.path.exists(abs_file): continue
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    file_contents[filepath] = content
+                with open(abs_file, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                    code_clean = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+                    code_clean = re.sub(r'//.*', '', code_clean)
+                    file_contents[rel_file] = code_clean
                     
-                    is_tb_file = "tb" in os.path.basename(filepath).lower() or "test" in os.path.basename(filepath).lower()
-                    
-                    # Heuristic metrics for Design Analysis
-                    inputs = len(re.findall(r'\binput\b', content))
-                    outputs = len(re.findall(r'\boutput\b', content))
-                    regs = len(re.findall(r'\breg\b', content))
-                    
-                    for i, line in enumerate(content.split('\n')):
-                        match = mod_pattern.search(line)
-                        if match:
-                            mod_name = match.group(1)
-                            is_tb = is_tb_file or bool(tb_indicators.search(content))
-                            self.modules[mod_name] = {
-                                "file": filepath,
-                                "line": i + 1,
-                                "is_tb": is_tb,
-                                "inputs": inputs,
-                                "outputs": outputs,
-                                "regs": regs
-                            }
-                            if is_tb and mod_name not in self.testbenches:
-                                self.testbenches.append(mod_name)
+                    mods = mod_re.findall(code_clean)
+                    for m in mods: declared_modules.add(m)
             except Exception:
                 pass
 
-        # 3. Top Module Detection
-        for mod_name in self.modules:
-            if self.modules[mod_name]["is_tb"]: 
-                continue
+        instantiated_modules = set()
+        for code in file_contents.values():
+            for mod in declared_modules:
+                if re.search(rf'\b{mod}\s+(?:#\s*\([\s\S]*?\)\s*)?[a-zA-Z_][a-zA-Z0-9_]*\s*\(', code):
+                    instantiated_modules.add(mod)
+
+        for rel_file, code in file_contents.items():
+            abs_file = os.path.join(self.root_path, rel_file)
+            mods = mod_re.findall(code)
+            has_dump = bool(dump_re.search(code))
             
-            is_instantiated_by_design = False
-            inst_pattern = re.compile(rf"\b{mod_name}\b")
-            
-            for filepath, content in file_contents.items():
-                if filepath != self.modules[mod_name]["file"]:
-                    file_is_tb = any(m["is_tb"] for m in self.modules.values() if m["file"] == filepath)
-                    if not file_is_tb:
-                        if inst_pattern.search(content):
-                            is_instantiated_by_design = True
-                            break
-            
-            if not is_instantiated_by_design:
-                self.top_modules.append(mod_name)
+            for mod in mods:
+                # Testbench definition: Dumps waveforms, or name has _tb / tb_
+                is_tb = has_dump or '_tb' in mod.lower() or 'tb_' in mod.lower() or '_tb' in rel_file.lower() or 'tb_' in rel_file.lower()
+                
+                self.modules[mod] = {
+                    "file": abs_file,
+                    "rel_file": rel_file,
+                    "is_tb": is_tb,
+                    "has_dump": has_dump,
+                    "is_instantiated": mod in instantiated_modules
+                }
+                
+                if is_tb:
+                    self.testbenches.append(mod)
+                elif mod not in instantiated_modules:
+                    self.top_modules.append(mod)
+
+        self.design_top = self.top_modules[0] if self.top_modules else ""
+        self.testbench_top = self.testbenches[0] if self.testbenches else ""

@@ -1,93 +1,126 @@
 """
 Project Explorer
-Responsibility: Displays and manages the actual project file tree with centralized icon assignment.
+Responsibility: Displays project files cleanly categorized and handles context menu actions.
 """
 import os
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QFileIconProvider
-from PySide6.QtCore import Qt, Signal, QFileInfo
-
-IGNORE_DIRS = {".git", "__pycache__", ".venv", "build", "dist", "target", "node_modules", ".idea", ".vscode"}
+from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QMenu, QStyle
+from PySide6.QtCore import Qt, Signal
 
 class ProjectExplorer(QTreeWidget):
-    file_double_clicked = Signal(str) # Emits the absolute path of the file
+    file_double_clicked = Signal(str)
+    req_new_v = Signal()
+    req_new_tb = Signal()
+    req_rename = Signal(str)
+    req_delete = Signal(str)
+    req_reveal = Signal(str)
+    req_refresh = Signal()
 
     def __init__(self):
         super().__init__()
-        self.setHeaderLabels(["PROJECT"])
-        self.setAnimated(True)
-        self.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.project_root = None
-        
-        # Native Qt provider that intelligently determines the correct icon for files/folders
-        self.icon_provider = QFileIconProvider()
+        self.setHeaderHidden(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+        self.itemDoubleClicked.connect(self.on_double_click)
+        self.root_path = ""
 
-    def assign_icon(self, item, path):
-        """
-        Centralized logic to assign the correct icon based on the filesystem item.
-        This guarantees new, existing, and renamed items all receive consistent icons.
-        """
-        file_info = QFileInfo(path)
-        icon = self.icon_provider.icon(file_info)
-        item.setIcon(0, icon)
-
-    def load_project(self, root_path):
-        """Clears the tree and populates it with the filesystem structure."""
+    def load_project(self, path):
         self.clear()
-        self.project_root = root_path
-        if not root_path or not os.path.exists(root_path):
+        if not path or not os.path.exists(path):
             return
-
-        self.setHeaderLabels([os.path.basename(root_path)])
-        self.populate_tree(self.invisibleRootItem(), root_path)
         
-        # Expand root level folders automatically
-        for i in range(self.topLevelItemCount()):
-            self.topLevelItem(i).setExpanded(True)
+        self.root_path = path
+        
+        rtl_node = QTreeWidgetItem(self, ["RTL Sources"])
+        tb_node = QTreeWidgetItem(self, ["Testbenches"])
+        wave_node = QTreeWidgetItem(self, ["Waveforms"])
+        synth_node = QTreeWidgetItem(self, ["Synthesis"])
+        build_node = QTreeWidgetItem(self, ["Build Artifacts"])
+        
+        font = rtl_node.font(0)
+        font.setBold(True)
+        for node in [rtl_node, tb_node, wave_node, synth_node, build_node]:
+            node.setFont(0, font)
+            node.setExpanded(True)
+            
+        has_rtl, has_tb, has_wave, has_synth, has_build = False, False, False, False, False
+        file_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        
+        for root, dirs, files in os.walk(path):
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ("__pycache__")]
+            
+            for f in files:
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, path).replace('\\', '/')
+                
+                item = QTreeWidgetItem([f])
+                item.setData(0, Qt.ItemDataRole.UserRole, full_path)
+                item.setIcon(0, file_icon)
+                
+                if f.endswith('.vcd'):
+                    wave_node.addChild(item)
+                    has_wave = True
+                elif ".rtlstudio/synthesis" in rel_path:
+                    synth_node.addChild(item)
+                    has_synth = True
+                elif ".rtlstudio/build" in rel_path:
+                    build_node.addChild(item)
+                    has_build = True
+                elif f.endswith(('.v', '.sv', '.vh', '.svh')):
+                    if "_tb" in f.lower() or "tb_" in f.lower():
+                        tb_node.addChild(item)
+                        has_tb = True
+                    else:
+                        rtl_node.addChild(item)
+                        has_rtl = True
+                        
+        rtl_node.setHidden(not has_rtl)
+        tb_node.setHidden(not has_tb)
+        wave_node.setHidden(not has_wave)
+        synth_node.setHidden(not has_synth)
+        build_node.setHidden(not has_build)
+        
+        if not (has_rtl or has_tb or has_wave or has_synth or has_build):
+            dummy = QTreeWidgetItem(self, ["(Empty Project)"])
+            dummy.setDisabled(True)
 
-    def populate_tree(self, parent_item, dir_path):
-        """Recursively populates the tree, sorting folders first, then files."""
-        try:
-            entries = os.listdir(dir_path)
-        except PermissionError:
-            return
+    def on_double_click(self, item, column):
+        filepath = item.data(0, Qt.ItemDataRole.UserRole)
+        if filepath:
+            self.file_double_clicked.emit(filepath)
 
-        folders = []
-        files = []
-
-        for entry in entries:
-            if entry in IGNORE_DIRS:
-                continue
-            full_path = os.path.join(dir_path, entry)
-            if os.path.isdir(full_path):
-                folders.append((entry, full_path))
-            else:
-                files.append((entry, full_path))
-
-        # Alphabetical sorting
-        folders.sort(key=lambda x: x[0].lower())
-        files.sort(key=lambda x: x[0].lower())
-
-        # Process Folders
-        for name, path in folders:
-            item = QTreeWidgetItem(parent_item, [name])
-            item.setData(0, Qt.ItemDataRole.UserRole, path)
-            self.assign_icon(item, path)  # <-- Centralized Icon Assignment
-            self.populate_tree(item, path)
-
-        # Process Files
-        for name, path in files:
-            item = QTreeWidgetItem(parent_item, [name])
-            item.setData(0, Qt.ItemDataRole.UserRole, path)
-            self.assign_icon(item, path)  # <-- Centralized Icon Assignment
-
-    def on_item_double_clicked(self, item, column):
-        path = item.data(0, Qt.ItemDataRole.UserRole)
-        if path and os.path.isfile(path):
-            self.file_double_clicked.emit(path)
-
-    def get_selected_path(self):
-        """Returns the path of the currently selected item, or the project root."""
-        items = self.selectedItems()
-        if items:
-            return items[0].data(0, Qt.ItemDataRole.UserRole)
-        return self.project_root
+    def show_context_menu(self, pos):
+        item = self.itemAt(pos)
+        menu = QMenu(self)
+        
+        if item and item.data(0, Qt.ItemDataRole.UserRole):
+            filepath = item.data(0, Qt.ItemDataRole.UserRole)
+            open_act = menu.addAction("Open")
+            open_act.triggered.connect(lambda: self.file_double_clicked.emit(filepath))
+            
+            # Only allow rename/delete on source files conceptually
+            if filepath.endswith(('.v', '.sv', '.vh', '.svh')):
+                rename_act = menu.addAction("Rename")
+                rename_act.triggered.connect(lambda: self.req_rename.emit(filepath))
+                
+                del_act = menu.addAction("Delete")
+                del_act.triggered.connect(lambda: self.req_delete.emit(filepath))
+            
+            menu.addSeparator()
+            reveal_act = menu.addAction("Reveal in File Manager")
+            reveal_act.triggered.connect(lambda: self.req_reveal.emit(filepath))
+        else:
+            new_v_act = menu.addAction("New Verilog File")
+            new_v_act.triggered.connect(self.req_new_v.emit)
+            
+            new_tb_act = menu.addAction("New Testbench")
+            new_tb_act.triggered.connect(self.req_new_tb.emit)
+            
+            menu.addSeparator()
+            ref_act = menu.addAction("Refresh Project")
+            ref_act.triggered.connect(self.req_refresh.emit)
+            
+            if self.root_path:
+                reveal_act = menu.addAction("Reveal in File Manager")
+                reveal_act.triggered.connect(lambda: self.req_reveal.emit(self.root_path))
+        
+        menu.exec(self.mapToGlobal(pos))

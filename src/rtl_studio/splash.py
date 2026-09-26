@@ -1,96 +1,88 @@
+"""
+Splash Screen
+Responsibility: Displays the initial loading screen with progress bar and fade-out animation.
+"""
 import os
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QGraphicsOpacityEffect
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, Signal
-from PySide6.QtGui import QPixmap
+import sys
+from PySide6.QtWidgets import QSplashScreen, QProgressBar, QVBoxLayout
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap, QColor
 
-class SplashScreen(QWidget):
-    # Custom signal to notify when the fade animation is fully complete
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        # Assuming splash.py is inside src/rtl_studio/
+        base_path = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    return os.path.join(base_path, relative_path)
+
+class SplashScreen(QSplashScreen):
     finished = Signal()
 
     def __init__(self):
         super().__init__()
-        
-        # Frameless, stays on top, standard splash behavior
-        self.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.resize(640, 420)
         
-        # FIX: Force the top-level QWidget to paint its background using the stylesheet
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Safely resolve the absolute path to RTL.png
+        img_path = get_resource_path(os.path.join("assets", "RTL.png"))
         
-        # Strict theme compliance for the splash background
-        self.setStyleSheet("background-color: #fefdf8;")
-        
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Center Logo
-        self.logo_label = QLabel(self)
-        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Resolve absolute path to assets/RTL.png safely relative to this file
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        logo_path = os.path.abspath(os.path.join(base_dir, "..", "..", "assets", "RTL.png"))
-        
-        if os.path.exists(logo_path):
-            pixmap = QPixmap(logo_path)
-            # Scale gracefully, preserving aspect ratio
-            pixmap = pixmap.scaled(350, 350, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self.logo_label.setPixmap(pixmap)
+        if os.path.exists(img_path):
+            pixmap = QPixmap(img_path)
+            self.setPixmap(pixmap.scaled(640, 420, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
         else:
-            self.logo_label.setText("PINARX RTL Studio")
-            self.logo_label.setStyleSheet("color: #171717; font-size: 32px; font-weight: bold;")
-            
-        # Loading Bar
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setFixedHeight(2) # Thin, minimal line
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+            print(f"DIAGNOSTIC: Splash image not found at: {img_path}")
+            # Use blank background as requested; explicitly omitting text fallback
+            pixmap = QPixmap(640, 420)
+            pixmap.fill(QColor("#fefdf8"))
+            self.setPixmap(pixmap)
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignBottom)
         
-        # Minimal styling: transparent background, dark accent chunk
+        # EXACT FIX: Reduced bottom margin from 30 to 5. 
+        # This pushes the progress bar 25 pixels further down, away from the logo text.
+        self.layout.setContentsMargins(40, 0, 40, 5)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setTextVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
+                background-color: #E0E0E0;
                 border: none;
-                background-color: transparent; 
+                border-radius: 3px;
             }
             QProgressBar::chunk {
-                background-color: #171717;
+                background-color: #F3A6C8;
+                border-radius: 3px;
             }
         """)
-        
-        # Spacing to keep layout professional and balanced
-        layout.addStretch()
-        layout.addWidget(self.logo_label)
-        layout.addSpacing(40)
-        layout.addWidget(self.progress_bar)
-        layout.addStretch()
-        
-        # Setup opacity effect for smooth fade out
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        
-        # Setup timing: 4.8 seconds to reach 100% (5000ms - 200ms buffer)
+        self.layout.addWidget(self.progress_bar)
+
         self.progress = 0
-        self.timer = QTimer(self)
+        self.timer = QTimer()
         self.timer.timeout.connect(self.update_progress)
-        self.timer.start(48) # 100 ticks * 48ms = 4.8 seconds
-        
+        # 4.8 seconds / 100 steps = 48ms
+        self.timer.start(48)
+
     def update_progress(self):
         self.progress += 1
         self.progress_bar.setValue(self.progress)
-        
         if self.progress >= 100:
             self.timer.stop()
             self.fade_out()
-            
+
     def fade_out(self):
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(500) # 0.5 seconds fade
-        self.animation.setStartValue(1.0)
-        self.animation.setEndValue(0.0)
-        self.animation.finished.connect(self.on_fade_finished)
-        self.animation.start()
-        
-    def on_fade_finished(self):
-        self.finished.emit()
-        self.close()
+        self.opacity = 1.0
+        self.fade_timer = QTimer()
+        self.fade_timer.timeout.connect(self.do_fade)
+        self.fade_timer.start(30)
+
+    def do_fade(self):
+        self.opacity -= 0.05
+        if self.opacity <= 0:
+            self.fade_timer.stop()
+            self.finished.emit()
+        else:
+            self.setWindowOpacity(self.opacity)

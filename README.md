@@ -39,4 +39,18 @@ RTL Studio performs a user-local installation without requiring `sudo` or modify
 3. Then install using
    ```bash
    ./install.sh
-4. In case you don't have the required 
+4. In case you don't have the required External EDA tools
+   ```bash
+   ./install_eda_tools.sh
+
+## 6. Screenshots
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/loading.png?raw=true)
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/ABOUT.png?raw=true)
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/WAVE.png?raw=true)
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/SCHEMATIC.png?raw=true)
+
+## NEW THEMES - CANDY POP $ GO PRODUCTIVE
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/CANDY_POP.png?raw=true)
+![Alt Text](https://github.com/sujan-angadi/PINARX-RTL_Studio/blob/main/GO_PRODUCTIVE.png?raw=true)
+
+

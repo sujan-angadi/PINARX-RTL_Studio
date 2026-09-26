@@ -36,3 +36,7 @@ RTL Studio performs a user-local installation without requiring `sudo` or modify
 2. Make the installer executable (if it isn't already):
    ```bash
    chmod +x install.sh
+3. Then install using
+   ```bash
+   ./install.sh
+4. In case you don't have the required 

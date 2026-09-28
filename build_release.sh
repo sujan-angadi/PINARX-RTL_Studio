@@ -15,7 +15,7 @@ if [ ! -f "dist/RTL_Studio/RTL_Studio" ]; then
 fi
 
 echo "Creating Final Release Directory..."
-RELEASE_DIR="$HOME/Documents/RTL-Studio-v3.0"
+RELEASE_DIR="$HOME/Documents/RTL-Studio-v4.0"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR/app"
 
@@ -32,6 +32,7 @@ cp assets/LOGO.png "$RELEASE_DIR/" 2>/dev/null || echo "Ensure LOGO.png is in as
 echo "Setting permissions..."
 chmod +x "$RELEASE_DIR/install.sh"
 chmod +x "$RELEASE_DIR/uninstall.sh"
+chmod +x "$RELEASE_DIR/install_eda_tools.sh"
 
 echo "=================================================="
 echo "SUCCESS! Release package created at:"

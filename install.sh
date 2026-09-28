@@ -8,7 +8,7 @@ BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons"
 
-echo "Installing RTL Studio v1.0..."
+echo "Installing RTL Studio..."
 
 # Handle Reinstall / Update safely
 if [ -d "$INSTALL_DIR" ]; then
@@ -25,7 +25,7 @@ mkdir -p "$ICON_DIR"
 # Verify package integrity
 if [ ! -d "$SRC_DIR/app" ]; then
     echo "ERROR: Application bundle ('app' directory) not found."
-    echo "Please ensure you are running this script from the RTL-Studio-v1.0 release package."
+    echo "Please ensure you are running this script from the RTL-Studio release package."
     exit 1
 fi
 
@@ -72,5 +72,6 @@ echo "=================================================="
 echo "Installation Complete!"
 echo "RTL Studio is now available in your Linux Applications menu."
 echo ""
-echo "Note: External EDA tools (Icarus, GTKWave, Yosys, Graphviz) are installed separately."
+echo "Run ./install_eda_tools.sh to install the external EDA toolchain."
+echo "To launch from a terminal, ensure ~/.local/bin is in your PATH."
 echo "=================================================="

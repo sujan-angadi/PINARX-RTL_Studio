@@ -9,10 +9,13 @@ import re
 import sys
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
                                QLabel, QStatusBar, QApplication, QFileDialog,
-                               QMessageBox, QInputDialog, QLineEdit, QPushButton, QTabWidget, QToolBar)
+                               QMessageBox, QInputDialog, QLineEdit, QPushButton, QTabWidget, QToolBar, 
+                               QToolBar, QStackedWidget
+                               )
 from PySide6.QtCore import Qt, QSettings, QProcess, QUrl
 from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextDocument, QDesktopServices
 
+from src.rtl_studio.widgets.optimization_panel import OptimizationPanel
 from src.rtl_studio.theme import get_stylesheet, create_eda_icon
 from src.rtl_studio.widgets.project_explorer import ProjectExplorer
 from src.rtl_studio.widgets.editor import EditorTabs
@@ -102,21 +105,9 @@ class MainWindow(QMainWindow):
             status_text += f"| Yosys: v{self.yosys.version} "
         else:
             status_text += "| Yosys: Not Found "
-            self.output_panel.log("Yosys was not found. Install Yosys (e.g. via OSS CAD Suite) and ensure it is available in PATH. Then restart RTL Studio.", "ERROR")
-
-        if self.graphviz.available:
-            status_text += f"| Graphviz: v{self.graphviz.version} "
-        else:
-            status_text += "| Graphviz: Not Found "
-            self.output_panel.log("Graphviz (dot) was not found. Ensure it is in your PATH. Schematic generation will be skipped.", "WARNING")
-
-        self.eda_status_label.setText(status_text)
-        if not self.icarus.available or not self.gtkwave.available or not self.yosys.available:
-            self.eda_status_label.setStyleSheet("color: #E01A4F; font-weight: bold;")
-
     def setup_ui(self):
         self.left_tabs = QTabWidget()
-
+        
         self.project_explorer = ProjectExplorer()
         self.project_explorer.file_double_clicked.connect(self.open_file_in_editor)
         self.project_explorer.req_new_v.connect(self.handle_req_new_v)
@@ -126,7 +117,7 @@ class MainWindow(QMainWindow):
         self.project_explorer.req_refresh.connect(self.handle_req_refresh)
         self.project_explorer.req_reveal.connect(self.handle_req_reveal)
         self.left_tabs.addTab(self.project_explorer, "Files")
-
+        
         self.analysis_panel = AnalysisPanel()
         self.analysis_panel.module_double_clicked.connect(self.goto_module_definition)
         self.left_tabs.addTab(self.analysis_panel, "Analysis")
@@ -154,29 +145,38 @@ class MainWindow(QMainWindow):
         editor_layout.addWidget(self.editor_tabs)
         editor_layout.addWidget(self.find_bar)
 
+        # PHASE 5: Dedicated Workspace Stack
+        self.main_stack = QStackedWidget()
+        self.main_stack.addWidget(self.editor_container)
+        
+        self.optimization_panel = OptimizationPanel()
+        self.optimization_panel.req_open_file.connect(self.open_file_in_editor)
+        self.main_stack.addWidget(self.optimization_panel)
+
         self.output_panel = OutputPanel()
         self.output_panel.error_clicked.connect(self.goto_error_definition)
-
+        
         self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.top_splitter.addWidget(self.left_tabs)
-        self.top_splitter.addWidget(self.editor_container)
+        self.top_splitter.addWidget(self.main_stack)  # Use stack instead of editor_container
         self.top_splitter.setStretchFactor(0, 0)
-        self.top_splitter.setStretchFactor(1, 1)
-        self.top_splitter.setSizes([240, 960])
-
+        self.top_splitter.setStretchFactor(1, 1) 
+        self.top_splitter.setSizes([240, 960]) 
+        
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.addWidget(self.top_splitter)
         self.main_splitter.addWidget(self.output_panel)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 0)
-        self.main_splitter.setSizes([650, 150])
+        self.main_splitter.setSizes([650, 150]) 
         self.setCentralWidget(self.main_splitter)
-
+        
+        # ... Status bar setup remains identically untouched below ...
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.editor_status_label = QLabel("RTL Studio Ready")
         self.status_bar.addWidget(self.editor_status_label)
-
+        
         self.eda_status_label = QLabel(" Detecting EDA Tools... ")
         self.lang_indicator = QLabel(" | Language: Verilog ")
         self.lang_indicator.setStyleSheet("color: #92929A;")
@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
         self.theme_toggle_btn.mousePressEvent = self.toggle_theme
         self.status_indicator = QLabel(" | ● PINARX ")
         self.status_indicator.setStyleSheet("color: #d85c96; font-weight: bold; font-family: monospace;")
-
+        
         self.status_bar.addPermanentWidget(self.eda_status_label)
         self.status_bar.addPermanentWidget(self.lang_indicator)
         self.status_bar.addPermanentWidget(self.theme_toggle_btn)
@@ -373,6 +373,20 @@ class MainWindow(QMainWindow):
         about_act.triggered.connect(self.show_about_app)
         help_menu.addAction(about_act)
 
+        self.schematic_act = QAction("View Schematic", self)
+        self.schematic_act.setIconText("Schematic")
+        self.schematic_act.setShortcut(QKeySequence("Ctrl+Shift+G"))
+        self.schematic_act.triggered.connect(self.open_schematic)
+        self.schematic_act.setEnabled(False)
+        self.run_menu.addAction(self.schematic_act)
+
+        # PHASE 5 Toolbar action
+        self.optimize_act = QAction("Optimize", self)
+        self.optimize_act.setIconText("Optimize")
+        self.optimize_act.triggered.connect(self.open_optimization_workspace)
+        self.optimize_act.setEnabled(False)
+        self.run_menu.addAction(self.optimize_act)
+
     def setup_toolbar(self):
         self.toolbar = QToolBar("EDA Workflow")
         self.toolbar.setMovable(False)
@@ -387,6 +401,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.yosys_act)
         self.toolbar.addAction(self.schematic_act)
+        self.toolbar.addAction(self.optimize_act)  # PHASE 5
 
     def update_toolbar_icons(self):
         self.build_act.setIcon(create_eda_icon("build", self.is_dark_theme, self.is_productive_theme, self.is_candy_theme))
@@ -395,6 +410,7 @@ class MainWindow(QMainWindow):
         self.gtkwave_act.setIcon(create_eda_icon("waveform", self.is_dark_theme, self.is_productive_theme, self.is_candy_theme))
         self.yosys_act.setIcon(create_eda_icon("synthesis", self.is_dark_theme, self.is_productive_theme, self.is_candy_theme))
         self.schematic_act.setIcon(create_eda_icon("schematic", self.is_dark_theme, self.is_productive_theme, self.is_candy_theme))
+        self.optimize_act.setIcon(create_eda_icon("optimize", self.is_dark_theme, self.is_productive_theme, self.is_candy_theme))
 
     def update_toolbar_state(self):
         if not self.current_project:
@@ -404,10 +420,11 @@ class MainWindow(QMainWindow):
             self.gtkwave_act.setEnabled(False)
             self.schematic_act.setEnabled(False)
             self.stop_act.setEnabled(False)
+            self.optimize_act.setEnabled(False)
             return
 
-        is_running = (self.build_process.state() == QProcess.ProcessState.Running or
-                      self.sim_process.state() == QProcess.ProcessState.Running or
+        is_running = (self.build_process.state() == QProcess.ProcessState.Running or 
+                      self.sim_process.state() == QProcess.ProcessState.Running or 
                       self.yosys_process.state() == QProcess.ProcessState.Running)
 
         self.stop_act.setEnabled(is_running)
@@ -418,15 +435,17 @@ class MainWindow(QMainWindow):
             self.yosys_act.setEnabled(False)
             self.gtkwave_act.setEnabled(False)
             self.schematic_act.setEnabled(False)
+            self.optimize_act.setEnabled(False)
         else:
             self.build_act.setEnabled(self.icarus.available)
             self.yosys_act.setEnabled(self.yosys.available)
-
+            self.optimize_act.setEnabled(True) # PHASE 5
+            
             vvp_file = os.path.join(self.current_project, ".rtlstudio", "build", "simulation.vvp")
             self.sim_act.setEnabled(self.icarus.available and os.path.exists(vvp_file))
-
+            
             self.gtkwave_act.setEnabled(self.gtkwave.available and bool(self.current_vcd) and os.path.exists(str(self.current_vcd)))
-
+            
             schematic_path = os.path.join(self.current_project, ".rtlstudio", "synthesis", "schematic.svg")
             self.schematic_act.setEnabled(self.graphviz.available and os.path.exists(schematic_path))
 
@@ -1249,3 +1268,18 @@ class MainWindow(QMainWindow):
                "<p><b>Technology:</b><br>"
                "Python<br>PySide6<br>Icarus Verilog<br>GTKWave<br>Yosys<br>Graphviz</p>")
         QMessageBox.about(self, "About RTL Studio", msg)
+
+    def open_optimization_workspace(self):
+        if not self.ensure_project_open(): return
+        self.main_stack.setCurrentWidget(self.optimization_panel)
+        self.optimization_panel.set_project(self.current_project, self.project_config)
+
+    # Note: Ensure open_file_in_editor pushes the editor back to the front
+    def open_file_in_editor(self, filepath):
+        self.main_stack.setCurrentWidget(self.editor_container)
+        if filepath.endswith(".vcd"): self.current_vcd = filepath; self.open_waveform(); return
+        if filepath.endswith("schematic.svg"): self.open_schematic(); return
+        if filepath.endswith(".vvp"):
+            self.output_panel.log("Cannot open binary compilation artifact (.vvp) in text editor.", "WARNING")
+            return
+        self.editor_tabs.open_file(filepath)

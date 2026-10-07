@@ -1,8 +1,4 @@
-"""
-Theme Manager
-Responsibility: Centralized QSS styling and SVG icon generation for the IDE.
-"""
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtCore import QByteArray
 
 def get_stylesheet(is_dark=True, is_productive=False, is_candy=False):
@@ -11,7 +7,6 @@ def get_stylesheet(is_dark=True, is_productive=False, is_candy=False):
     radius_item = "4px"
 
     if is_candy:
-        # EXACT FIX: Light Baby-Pink Candy Pop Palette
         bg = "#ffd9ec"
         editor_bg = "#fff5fa"
         panel_bg = "#fff0f7"
@@ -149,8 +144,10 @@ def create_eda_icon(name, is_dark, is_productive=False, is_candy=False):
         color = accent_sec
     elif name == "schematic":
         path = '<circle cx="12" cy="12" r="3"></circle><path d="M3 12h3M18 12h3M12 3v3M12 18v3"></path>'
-        # EXACT FIX: Schematic icon uses tertiary success green for Candy Pop
         color = "#7ed957" if is_candy else accent_sec
+    elif name == "optimize":
+        path = '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>'
+        color = accent_pri
     else:
         path = '<circle cx="12" cy="12" r="10"></circle>'
         color = text

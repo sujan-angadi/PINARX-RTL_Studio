@@ -5,7 +5,7 @@ Responsibility: Safely detects local EDA toolchains (Icarus, GTKWave, Yosys, Gra
 import os
 import shutil
 import subprocess
-from PySide6.QtCore import QProcessEnvironment
+# ARCHITECTURAL FIX: Removed top-level PySide6 import to support headless execution.
 
 def get_oss_cad_suite_bin():
     """Returns the expected OSS CAD Suite bin directory using the user's home folder."""
@@ -17,15 +17,15 @@ def get_tool_path(tool_name):
     system_path = shutil.which(tool_name)
     if system_path:
         return system_path
-
+        
     fallback_path = os.path.join(get_oss_cad_suite_bin(), tool_name)
     if os.path.isfile(fallback_path) and os.access(fallback_path, os.X_OK):
         return fallback_path
-
+        
     return None
 
 def get_eda_env_dict():
-    """Returns an environment dictionary for Python subprocess calls."""
+    """Returns an environment dictionary for Python subprocess calls (HEADLESS SAFE)."""
     env = os.environ.copy()
     oss_bin = get_oss_cad_suite_bin()
     if os.path.isdir(oss_bin):
@@ -33,7 +33,10 @@ def get_eda_env_dict():
     return env
 
 def get_eda_qenv():
-    """Returns a QProcessEnvironment for PySide6 QProcess calls."""
+    """Returns a QProcessEnvironment for PySide6 QProcess calls (GUI ONLY)."""
+    # EXACT FIX: Lazy import PySide6 only when explicitly requested by the GUI
+    from PySide6.QtCore import QProcessEnvironment 
+    
     qenv = QProcessEnvironment.systemEnvironment()
     oss_bin = get_oss_cad_suite_bin()
     if os.path.isdir(oss_bin):

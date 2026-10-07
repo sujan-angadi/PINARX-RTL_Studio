@@ -15,7 +15,7 @@ if [ ! -f "dist/RTL_Studio/RTL_Studio" ]; then
 fi
 
 echo "Creating Final Release Directory..."
-RELEASE_DIR="$HOME/Documents/RTL-Studio-v4.0"
+RELEASE_DIR="$HOME/Documents/RTL-Studio-v5.0"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR/app"
 
